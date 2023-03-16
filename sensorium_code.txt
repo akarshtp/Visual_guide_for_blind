@@ -1,0 +1,130 @@
+#include <opencv2/opencv.hpp>
+#include <Windows.h>
+#include <opencv2/highgui.hpp>
+#include <NuiApi.h>
+
+int main()
+{
+    // Initialize Kinect sensor
+    INuiSensor* sensor;
+    HRESULT hr = NuiCreateSensorByIndex(0, &sensor);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create Kinect sensor!" << std::endl;
+        return -1;
+    }
+
+    hr = sensor->NuiInitialize(NUI_INITIALIZE_FLAG_USES_DEPTH);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to initialize Kinect sensor!" << std::endl;
+        return -1;
+    }
+
+    // Open Kinect depth stream
+    HANDLE depthStreamHandle = NULL;
+    hr = sensor->NuiImageStreamOpen(
+        NUI_IMAGE_TYPE_DEPTH, // Image type
+        NUI_IMAGE_RESOLUTION_640x480, // Image resolution
+        0, // Image stream flags
+        2, // Number of frames to buffer
+        NULL, // Event handle (auto-create)
+        &depthStreamHandle // Stream handle
+    );
+    if (FAILED(hr)) {
+        std::cerr << "Failed to open Kinect depth stream!" << std::endl;
+        return -1;
+    }
+
+    // Get depth stream size
+    NUI_IMAGE_RESOLUTION depthResolution = NUI_IMAGE_RESOLUTION_640x480;
+    DWORD depthWidth, depthHeight;
+    NuiImageResolutionToSize(depthResolution, depthWidth, depthHeight);
+
+
+
+    // Split the output image video into 15 groups of resolution 128X160
+    const int numCols = 5; // Number of columns
+    const int numRows = 3; // Number of rows
+    const int groupWidth = depthWidth / numCols; // Width of each group
+    const int groupHeight = depthHeight / numRows; // Height of each group
+
+    while (true) {
+        // Get latest depth frame
+        NUI_IMAGE_FRAME depthFrame = { 0 };
+        HRESULT hr = sensor->NuiImageStreamGetNextFrame(
+            depthStreamHandle, // Stream handle
+            0, // Timeout (0 = infinite)
+            &depthFrame // Output image frame
+        );
+        
+        if (SUCCEEDED(hr)) {
+            // Get depth frame data
+            NUI_LOCKED_RECT depthLockedRect;
+            hr = depthFrame.pFrameTexture->LockRect(0, &depthLockedRect, NULL, 0);
+            if (SUCCEEDED(hr)) {
+                // Convert depth frame data to OpenCV format
+                cv::Mat depthMat(depthHeight, depthWidth, CV_16UC1, depthLockedRect.pBits);
+                cv::imshow("Kinect Image", depthMat);
+                cv::waitKey(1);
+                
+
+                // Normalize the depth values between 0 and 255
+                cv::Mat normalizedMat;
+                cv::normalize(depthMat, normalizedMat, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+
+                // Calculate the average pixel values for each group
+                std::vector<double> avgPixelValues(numCols * numRows);
+                for (int i = 0; i < numRows; i++) {
+                    for (int j = 0; j < numCols; j++) {
+                        cv::Rect groupRect(j * groupWidth, i * groupHeight, groupWidth, groupHeight);
+                        cv::Mat groupMat = normalizedMat(groupRect);
+                        avgPixelValues[i * numCols + j] = cv::mean(groupMat)[0];
+                    }
+                }
+
+                // Loop through each group and set pixels based on average value
+                for (int i = 0; i < numRows; i++) {
+                    for (int j = 0; j < numCols; j++) {
+                        int groupIndex = i * numCols + j;
+                        double avgValue = avgPixelValues[groupIndex];
+                        // Set pixels in the group to 0 if the average value is closest to 0
+                        if (std::abs(avgValue - 0) < std::abs(avgValue - 128) && std::abs(avgValue - 0) < std::abs(avgValue - 255)) {
+                            cv::Rect groupRect(j * groupWidth, i * groupHeight, groupWidth, groupHeight);
+                            normalizedMat(groupRect) = cv::Scalar(0);
+                        }
+                        // Set pixels in the group to 128 if the average value is closest to 128
+                        else if (std::abs(avgValue - 128) < std::abs(avgValue - 0) && std::abs(avgValue - 128) < std::abs(avgValue - 255)) {
+                            cv::Rect groupRect(j * groupWidth, i * groupHeight, groupWidth, groupHeight);
+                            normalizedMat(groupRect) = cv::Scalar(128);
+                        }
+                        // Set pixels in the group to 255 if the average value is closest to 255
+                        else {
+                            cv::Rect groupRect(j * groupWidth, i * groupHeight, groupWidth, groupHeight);
+                            normalizedMat(groupRect) = cv::Scalar(255);
+                        }
+                    }
+                }
+
+                // Display the processed image
+                cv::imshow("Processed Image", normalizedMat);
+                cv::waitKey(1);
+            
+                
+                
+
+                 
+            }
+            sensor->NuiImageStreamReleaseFrame(depthStreamHandle, &depthFrame);
+
+            
+        }
+        
+       
+    }//while
+    
+     // Release resources  
+    cv::waitKey();
+    sensor->NuiShutdown();
+    sensor->Release();
+    cv::destroyAllWindows();
+    return 0;
+}

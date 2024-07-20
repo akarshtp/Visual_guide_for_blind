@@ -10,3 +10,6 @@ The processed image is displayed using OpenCV's imshow() function. The while loo
 Finally, the code releases the resources and shuts down the Kinect sensor.
 
 This code demonstrates the basic steps involved in processing depth frames from the Kinect sensor using OpenCV.
+![product](https://github.com/user-attachments/assets/f14eb818-d117-41c0-b0ac-ad3bdce957f0)
+product image
+
